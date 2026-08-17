@@ -1,0 +1,2 @@
+# Esta pasta guarda os arquivos parquet gerados pela coleta.
+# Os arquivos .parquet são ignorados pelo Git (veja .gitignore).

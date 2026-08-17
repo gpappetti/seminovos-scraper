@@ -1,0 +1,38 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Ambientes / segredos
+.env
+*.env
+
+# Dados coletados (arquivos parquet e resumos gerados)
+data/*.parquet
+data/*.json
+*.parquet
+scrape_summary.json
+
+# IDEs e editores
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
