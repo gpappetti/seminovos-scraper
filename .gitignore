@@ -36,3 +36,7 @@ scrape_summary.json
 
 # Logs
 *.log
+
+# Segredos do banco
+db/.env
+.env

@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import pandas as pd
 import time
@@ -12,14 +13,39 @@ print("=" * 60)
 print("SCRAPING LOCALIZA (FAST)...")
 print("=" * 60)
 
-BUILD_ID = "version-4.31.0"
-BASE_URL = f"https://seminovos.localiza.com/_next/data/{BUILD_ID}/carros.json"
-
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'application/json',
     'Referer': 'https://seminovos.localiza.com/carros',
 }
+
+# Fallback build id (used only if dynamic detection fails)
+FALLBACK_BUILD_ID = "version-4.48.0"
+
+
+def get_build_id():
+    """Fetch the current Next.js buildId dynamically from the site.
+
+    The buildId changes whenever the site is redeployed. Hardcoding it makes the
+    data endpoint return 404, so we always try to detect it at runtime and fall
+    back to a known value only if detection fails.
+    """
+    try:
+        page = requests.get("https://seminovos.localiza.com/carros", headers=HEADERS, timeout=30)
+        page.raise_for_status()
+        m = re.search(r'"buildId":"([^"]+)"', page.text)
+        if m:
+            build_id = m.group(1)
+            print(f"Detected buildId: {build_id}")
+            return build_id
+        print("WARNING: could not detect buildId in page, using fallback")
+    except Exception as e:
+        print(f"WARNING: failed to detect buildId ({e}), using fallback")
+    return FALLBACK_BUILD_ID
+
+
+BUILD_ID = get_build_id()
+BASE_URL = f"https://seminovos.localiza.com/_next/data/{BUILD_ID}/carros.json"
 
 # Get total
 resp = requests.get(BASE_URL, params={"page": 1}, headers=HEADERS, timeout=30)
@@ -48,17 +74,11 @@ def fetch_page(page):
                 
                 marca = item.get('marcaDescricao', '')
                 modelo = item.get('modeloFamiliaDescricao', '')
-                modelo_desc = item.get('modeloDescricaoReduzida', '')
-                versao_desc = item.get('versaoDescricao', '')
-                
-                if versao_desc and modelo_desc:
-                    versao = f"{versao_desc} {modelo_desc}"
-                elif versao_desc:
-                    versao = versao_desc
-                elif modelo_desc:
-                    versao = modelo_desc
-                else:
-                    versao = ''
+                # NOTE: 'versaoDescricao' is unreliable — the API returns the constant
+                # string "LONGITUDE" for every vehicle, which previously polluted every
+                # VERSÃO with a bogus "LONGITUDE " prefix. The real trim/version text lives
+                # in 'modeloDescricaoReduzida', so we use that field exclusively.
+                versao = item.get('modeloDescricaoReduzida', '') or ''
                 
                 cidade = item.get('cidadeDescricao', '')
                 estado = item.get('siglaEstado', '')
