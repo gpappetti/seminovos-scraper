@@ -1,185 +1,170 @@
-# 🚗 Seminovos Scraper
+# Scraper de Veículos Seminovos
 
-Coletor de dados (web scraper) de anúncios de veículos seminovos das plataformas
-**Movida Seminovos** e **Localiza Seminovos**. O projeto acessa as APIs públicas
-utilizadas pelos próprios sites para extrair informações de todos os veículos
-disponíveis e salvá-las em arquivos [Parquet](https://parquet.apache.org/),
-prontos para análise em ferramentas como pandas, Power BI, entre outras.
+Projeto de coleta diária automatizada de veículos seminovos das plataformas **Movida** e **Localiza**, com armazenamento em banco de dados PostgreSQL (Supabase) para análises temporais.
 
----
+## 📋 Funcionalidades
 
-## 📋 Descrição do projeto
+- ✅ **Scraping paralelo** de Movida e Localiza (threads concorrentes)
+- ✅ **Detecção dinâmica** do buildId do Next.js (Localiza) — não quebra com deploys do site
+- ✅ **Correção automática** do bug "LONGITUDE" da API da Localiza
+- ✅ **Banco de dados point-in-time** com histórico completo e normalização
+- ✅ **Carga idempotente** — rodar múltiplas vezes não duplica dados
+- ✅ Exportação em Parquet para backup/análise offline
 
-Os sites de seminovos da Movida e da Localiza carregam seus anúncios através de
-APIs JSON internas. Este projeto consome essas APIs de forma paralela e eficiente
-(usando *threads*), consolidando os dados em um formato tabular padronizado.
+## 🗄️ Estrutura do Banco de Dados
 
-- **Movida:** `https://www.seminovosmovida.com.br/busca`
-- **Localiza:** `https://seminovos.localiza.com/carros`
+Tabela única `veiculos` no Supabase (PostgreSQL):
 
-O script principal ([`src/scrape_vehicles.py`](src/scrape_vehicles.py)) coleta
-os dois sites de uma só vez e gera um resumo em JSON. Também existem scripts
-individuais para cada fonte, caso você queira rodar apenas uma delas.
+| Categoria | Colunas |
+|---|---|
+| **Originais** (preservadas) | marca, modelo, versao, odometro, ano_modelo_raw, cambio, preco, cidade_estado |
+| **Normalizadas** | fornecedora, data_referencia, preco_num, odometro_num, ano_fabricacao, ano_modelo, cidade, estado, marca_norm, modelo_norm |
 
----
+**Modelo:** histórico completo (point-in-time) — cada veículo/dia é uma linha, permitindo análises de evolução de preço, tempo de estoque, sazonalidade, etc.
 
-## ✨ Funcionalidades
+**Volume atual:** ~2,5 milhões de linhas (96 dias × ~27 mil veículos/dia)
 
-- ✅ Coleta **todos** os veículos disponíveis nas duas plataformas.
-- ⚡ Requisições **paralelas** (ThreadPoolExecutor) para máxima velocidade.
-- 🔁 **Retentativas automáticas** (3 tentativas) em caso de falha de rede.
-- 🧩 Detecção **dinâmica do `buildId`** da Localiza (não depende de versão fixa).
-- 💾 Saída em **Parquet** (compacto e tipado), um arquivo por plataforma.
-- 📊 Geração de um **resumo em JSON** com a contagem de veículos coletados.
-- 🗂️ Esquema de dados **padronizado** entre as duas fontes.
+## ⚙️ Configuração
 
----
-
-## 🧱 Estrutura dos dados coletados
-
-Cada linha representa um veículo, com as seguintes colunas:
-
-| Coluna          | Descrição                                        | Exemplo                     |
-|-----------------|--------------------------------------------------|-----------------------------|
-| `MARCA`         | Marca do veículo                                 | `FIAT`                      |
-| `MODELO`        | Modelo/família                                   | `ARGO`                      |
-| `VERSÃO`        | Versão detalhada                                 | `1.0 DRIVE ARGO`            |
-| `ODÔMETRO`      | Quilometragem                                    | `45000`                     |
-| `ANO/MODELO`    | Ano de fabricação/ano modelo                     | `2021/2022`                 |
-| `CÂMBIO`        | Tipo de transmissão                              | `Automático`                |
-| `PREÇO`         | Preço anunciado                                  | `68990`                     |
-| `CIDADE/ESTADO` | Localização no formato `cidade/UF`               | `Belo Horizonte/MG`         |
-
-Arquivos gerados na pasta `data/`:
-
-- `movida_veiculos.parquet`
-- `localiza_veiculos.parquet`
-- `scrape_summary.json` (resumo da execução — apenas o script principal)
-
----
-
-## 🔧 Requisitos e instalação
-
-- **Python 3.8+**
-
-Clone o repositório e instale as dependências:
+### 1. Dependências
 
 ```bash
-git clone https://github.com/<SEU_USUARIO>/seminovos-scraper.git
-cd seminovos-scraper
-
-# (opcional, recomendado) crie um ambiente virtual
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-
 pip install -r requirements.txt
 ```
 
-Dependências principais (ver [`requirements.txt`](requirements.txt)):
-
-- `requests` — chamadas HTTP às APIs
-- `pandas` — manipulação e tabulação dos dados
-- `pyarrow` — gravação dos arquivos Parquet
-
----
-
-## ▶️ Como usar
-
-### 1. Coletar as duas plataformas de uma vez (recomendado)
+### 2. Banco de dados (Supabase)
 
 ```bash
-python src/scrape_vehicles.py
+# Copie o template
+cp db/.env.example db/.env
+
+# Edite db/.env com suas credenciais do Supabase
+# DATABASE_URL=postgresql://postgres.SEU_REF:SUA_SENHA@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+
+# Crie o schema (apenas uma vez)
+python db/populate_db.py --schema
 ```
 
-Isso irá gerar `data/movida_veiculos.parquet`, `data/localiza_veiculos.parquet`
-e `data/scrape_summary.json`.
+**⚠️ IMPORTANTE:** use a **connection string do pooler IPv4** (`aws-0-REGIÃO.pooler.supabase.com`), não a direta (`db.*.supabase.co`), pois a última usa IPv6.
 
-### 2. Coletar apenas uma plataforma
+### 3. Carga histórica (opcional)
+
+Se você tem arquivos parquet históricos (ex.: de e-mails anteriores), coloque-os em um diretório com o padrão `{fornecedora}_veiculos_YYYY-MM-DD.parquet` e rode:
 
 ```bash
-python src/scrape_movida.py     # Somente Movida
-python src/scrape_localiza.py   # Somente Localiza
+python db/populate_db.py --dir /caminho/para/parquets
 ```
 
-### 3. Escolher a pasta de saída
+## 🚀 Uso
 
-Por padrão os arquivos são salvos em `data/`. Para mudar, defina a variável de
-ambiente `OUTPUT_DIR`:
+### Coleta diária (scraping + banco)
 
 ```bash
-OUTPUT_DIR=/caminho/para/saida python src/scrape_vehicles.py
+python src/run_daily.py
 ```
 
-(Veja o arquivo [`.env.example`](.env.example).)
+Isso vai:
+1. Fazer scraping da Localiza e Movida
+2. Salvar parquets locais em `data/`
+3. Inserir os dados no banco com `data_referencia` = hoje
 
----
+### Opções
 
-## 📈 Exemplos de uso
+```bash
+# Apenas scraping (sem inserir no banco)
+python src/run_daily.py --no-db
 
-Ler e analisar os dados coletados com pandas:
+# Especificar data de referência
+python src/run_daily.py --date 2026-08-30
 
-```python
-import pandas as pd
-
-df = pd.read_parquet("data/localiza_veiculos.parquet")
-
-print(f"Total de veículos: {len(df)}")
-
-# 10 marcas mais anunciadas
-print(df["MARCA"].value_counts().head(10))
-
-# Filtrar por faixa de preço e estado
-baratos_mg = df[(df["PREÇO"].astype(float) < 60000) &
-                (df["CIDADE/ESTADO"].str.endswith("/MG"))]
-print(baratos_mg.head())
+# Pular envio de e-mail (funcionalidade ainda não implementada)
+python src/run_daily.py --no-email
 ```
 
-Combinar as duas fontes:
+### Scrapers individuais
 
-```python
-import pandas as pd
+```bash
+# Apenas Localiza
+python src/scrape_localiza.py
 
-movida = pd.read_parquet("data/movida_veiculos.parquet")
-localiza = pd.read_parquet("data/localiza_veiculos.parquet")
-
-movida["FONTE"] = "Movida"
-localiza["FONTE"] = "Localiza"
-
-todos = pd.concat([movida, localiza], ignore_index=True)
-print(f"Total combinado: {len(todos)} veículos")
+# Apenas Movida
+python src/scrape_movida.py
 ```
 
----
+## 📊 Análises / Power BI
 
-## 📁 Estrutura do projeto
+Exemplos de queries úteis:
+
+```sql
+-- Evolução de preço médio por marca/modelo ao longo do tempo
+SELECT 
+    data_referencia,
+    marca_norm,
+    modelo_norm,
+    ROUND(AVG(preco_num)) as preco_medio,
+    COUNT(*) as estoque
+FROM veiculos
+WHERE marca_norm = 'VOLKSWAGEN' AND modelo_norm = 'POLO'
+GROUP BY data_referencia, marca_norm, modelo_norm
+ORDER BY data_referencia;
+
+-- Tempo médio de permanência no estoque (quanto tempo até sumir/vender)
+-- (requer identificação estável de veículos via odômetro + versão + cidade)
+
+-- Comparação de preços Movida vs Localiza
+SELECT 
+    modelo_norm,
+    fornecedora,
+    ROUND(AVG(preco_num)) as preco_medio,
+    COUNT(*) as qtd
+FROM veiculos
+WHERE data_referencia = '2026-08-30'
+GROUP BY modelo_norm, fornecedora
+HAVING COUNT(*) > 5
+ORDER BY modelo_norm, fornecedora;
+```
+
+## 🐛 Bugs Corrigidos
+
+### Bug "LONGITUDE" (Localiza)
+
+**Problema:** a API da Localiza retornava o campo `versaoDescricao` sempre com a string constante `"LONGITUDE"` (lixo), poluindo 100% dos registros.
+
+**Correção:** o scraper agora usa exclusivamente `modeloDescricaoReduzida` (que contém a versão real), e o pipeline de ETL remove o prefixo espúrio dos dados históricos, preservando as versões "Longitude" legítimas dos Jeep Compass/Renegade/Commander.
+
+### BuildId desatualizado (Localiza)
+
+**Problema:** o buildId do Next.js estava hardcoded (`version-4.31.0`), fazendo a API retornar 404 após deploys do site.
+
+**Correção:** detecção dinâmica via regex na página HTML — o scraper sempre usa o buildId atual.
+
+## 📁 Estrutura do Projeto
 
 ```
 seminovos-scraper/
 ├── src/
-│   ├── scrape_vehicles.py   # Script principal (Movida + Localiza + resumo JSON)
-│   ├── scrape_movida.py     # Coletor individual da Movida
-│   └── scrape_localiza.py   # Coletor individual da Localiza
-├── data/                    # Saída dos arquivos .parquet (ignorados pelo Git)
-│   └── .gitkeep
-├── docs/                    # Documentação adicional
-├── requirements.txt         # Dependências Python
-├── .env.example             # Exemplo de configuração de ambiente
-├── .gitignore
+│   ├── scrape_localiza.py   # Scraper da Localiza (corrigido)
+│   ├── scrape_movida.py     # Scraper da Movida
+│   ├── scrape_vehicles.py   # (legado, mantido para referência)
+│   └── run_daily.py         # ⭐ Orquestrador principal (scraping + banco)
+├── db/
+│   ├── schema.sql           # DDL da tabela veiculos
+│   ├── populate_db.py       # Pipeline de ETL (correção + normalização + carga)
+│   ├── .env.example         # Template de configuração
+│   └── .env                 # ⚠️ SUA senha (não commitado)
+├── data/                    # Parquets gerados localmente (ignorado pelo git)
+├── requirements.txt
 └── README.md
 ```
 
----
+## 🤝 Contribuindo
 
-## ⚠️ Aviso legal
-
-Este projeto foi desenvolvido para fins **educacionais e de análise de dados**.
-Ele consome APIs públicas dos sites da Movida e da Localiza. Use de forma
-responsável, respeitando os Termos de Uso de cada plataforma e evitando um
-volume excessivo de requisições. Os dados coletados pertencem às respectivas
-plataformas.
-
----
+Melhorias bem-vindas:
+- [ ] Implementar envio de e-mail com os parquets (atualmente é placeholder)
+- [ ] Dashboard web (Streamlit/Plotly) para visualização dos dados
+- [ ] Detector de oportunidades (carros com preço abaixo da curva)
+- [ ] Alertas de novos modelos/versões
 
 ## 📄 Licença
 
-Distribuído sob a licença MIT. Consulte o arquivo [`LICENSE`](LICENSE).
+MIT — veja LICENSE para detalhes.
