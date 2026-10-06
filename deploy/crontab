@@ -4,5 +4,9 @@
 # Pipeline diario as 06:00 (scraping Localiza+Movida -> banco local)
 0 6 * * * app cd /opt/raio-x/scraper && /opt/raio-x/scraper/.venv/bin/python src/run_daily.py --no-email >> /var/log/raio-x/pipeline.log 2>&1
 
+# Monitor: 30 min apos o pipeline, confere dados do dia + dashboard e
+# envia push ntfy (OK/FALHA). Requer NTFY_TOPIC em /opt/raio-x/deploy/.env
+30 6 * * * root mkdir -p /var/log/raio-x && cd /opt/raio-x/deploy && set -a && . ./.env && set +a && ./monitor_check.sh >> /var/log/raio-x/monitor.log 2>&1
+
 # Backup mensal do banco (dia 1o, 04:00)
-0 4 1 * * root mkdir -p /var/backups/raio-x && pg_dump -U postgres -F c -f /var/backups/raio-x/raio_x_$(date +\%Y\%m).dump raio_x
+0 4 1 * * root mkdir -p /var/backups/raio-x && docker exec deploy-db-1 pg_dump -U raio_x raio_x | gzip > /var/backups/raio-x/raio_x_$(date +\%Y\%m).sql.gz

@@ -1,0 +1,23 @@
+# Override que publica o dashboard via Traefik (HTTPS + senha).
+# Uso na VPS (onde um Traefik proxy ja roda na rede proxy-net):
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
+# Requer no deploy/.env (fora do git):
+#   RAIOX_BASIC_AUTH=usuario:hash_apr1   (openssl passwd -apr1)
+#   RAIOX_DOMAIN=seu.host.hstgr.cloud
+services:
+  app:
+    networks:
+      - default
+      - proxy-net
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.raiox.rule=Host(`${RAIOX_DOMAIN:?defina RAIOX_DOMAIN no .env}`)
+      - traefik.http.routers.raiox.entrypoints=websecure
+      - traefik.http.routers.raiox.tls.certresolver=letsencrypt
+      - traefik.http.routers.raiox.middlewares=raiox-auth
+      - traefik.http.services.raiox.loadbalancer.server.port=3000
+      - traefik.http.middlewares.raiox-auth.basicauth.users=${RAIOX_BASIC_AUTH:?defina RAIOX_BASIC_AUTH no .env}
+
+networks:
+  proxy-net:
+    external: true

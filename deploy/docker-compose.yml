@@ -37,7 +37,9 @@ services:
       DATABASE_URL: postgresql://raio_x:${POSTGRES_PASSWORD}@db:5432/raio_x
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
     ports:
-      - "3000:3000"
+      # Somente localhost: o acesso público vai pelo Traefik (HTTPS + senha),
+      # via deploy/docker-compose.traefik.yml
+      - "127.0.0.1:3000:3000"
     depends_on:
       db:
         condition: service_healthy
