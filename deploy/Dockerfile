@@ -1,18 +1,18 @@
 # Imagem do dashboard (raio-x seminovos). Build a partir da raiz do repo:
 #   docker build -f deploy/Dockerfile -t raio-x .
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json .yarnrc.yml ./
 RUN corepack enable && yarn install
 
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN corepack yarn build
 
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

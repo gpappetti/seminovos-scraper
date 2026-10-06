@@ -1,7 +1,15 @@
-# Alternativa ao setup_vps.sh: stack completa via Docker.
-#   cd deploy && docker compose up -d --build
-# Para rodar o pipeline manualmente:
-#   docker compose run --rm scraper python src/run_daily.py --no-db
+# Stack completa do raio-x seminovos em Docker.
+# Nunca usou Docker? Comece aqui (a partir da pasta deploy/):
+#   1) crie o arquivo .env com POSTGRES_PASSWORD=sua_senha
+#   2) docker compose up -d --build
+# O app sobe na porta 3000; o pipeline roda todo dia às 06:00
+# pelo serviço "scheduler" (ofelia), sem configurar cron no host.
+#
+# Comandos do dia a dia:
+#   docker compose logs -f app                 # ver o dashboard
+#   docker start raio-x-pipeline               # rodar o pipeline agora
+#   docker compose exec db psql -U raio_x ...  # consultar o banco
+#   git pull && docker compose up -d --build   # atualizar a stack
 services:
   db:
     image: postgres:16-alpine
@@ -34,18 +42,40 @@ services:
       db:
         condition: service_healthy
 
+  # Pipeline de ingestão. Container de nome fixo "raio-x-pipeline":
+  # o scheduler (abaixo) o inicia todo dia às 06:00, e você pode
+  # reexecutá-lo manualmente com `docker start raio-x-pipeline`.
+  # O primeiro `up -d` já dispara uma execução inicial.
   scraper:
     image: python:3.11-slim
-    profiles: ["scraper"]
+    container_name: raio-x-pipeline
+    restart: "no"
     working_dir: /srv
     environment:
       DATABASE_URL: postgresql://raio_x:${POSTGRES_PASSWORD}@db:5432/raio_x
     volumes:
       - ../scraper:/srv
-    command: bash -c "pip install --no-cache-dir -r requirements.txt && python src/run_daily.py --no-email"
+      - pipcache:/root/.cache/pip
+    command: bash -c "pip install --quiet -r requirements.txt && python src/run_daily.py --no-email"
     depends_on:
       db:
         condition: service_healthy
 
+  # Agendador: roda `docker start raio-x-pipeline` todo dia às 06:00
+  # (formato de 6 campos: "seg min hora dia mês dow"). Precisa de
+  # acesso ao socket do Docker para gerenciar os outros containers.
+  scheduler:
+    image: mcuadros/ofelia:latest
+    restart: unless-stopped
+    command: daemon --docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      ofelia.job-run.pipeline.schedule: "0 0 6 * * *"
+      ofelia.job-run.pipeline.container: "raio-x-pipeline"
+    depends_on:
+      - scraper
+
 volumes:
   pgdata:
+  pipcache:

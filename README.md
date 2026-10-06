@@ -57,10 +57,33 @@ O script instala Postgres + Node + Python, cria banco/usuário, aplica o
 schema, faz o build do dashboard, instala o serviço systemd e a
 rotina diária no cron (06:00).
 
-**Caminho 2 — Docker:**
+**Caminho 2 — Docker (recomendado; não exige instalar Postgres/Node na VPS):**
 ```bash
-echo "POSTGRES_PASSWORD=uma_senha_forte" > deploy/.env
-docker compose -f deploy/docker-compose.yml up -d --build
+# 1. Instalar o Docker (uma vez; Ubuntu):
+curl -fsSL https://get.docker.com | sh
+
+# 2. Clonar e subir:
+git clone -b seminovos-app https://github.com/gpappetti/seminovos-scraper.git /opt/raio-x
+cd /opt/raio-x/deploy
+echo "POSTGRES_PASSWORD=escolha_uma_senha_forte" > .env
+echo "NEXTAUTH_URL=http://IP_DA_VPS:3000" >> .env
+docker compose up -d --build   # na 1a vez baixa imagens e compila (~5-10 min)
+```
+O que sobe (definido em `deploy/docker-compose.yml`):
+| Serviço | Papel |
+|---|---|
+| `db` | PostgreSQL 16 com schema aplicado e dados em volume persistente |
+| `app` | Dashboard (Next.js) na porta 3000 |
+| `scraper` | Pipeline diário (container `raio-x-pipeline`) |
+| `scheduler` | Dispara o pipeline todo dia às 06:00 (sem cron no host) |
+
+Comandos do dia a dia:
+```bash
+docker compose logs -f app                    # acompanhar o dashboard
+docker start raio-x-pipeline                  # rodar o pipeline agora
+docker compose exec db psql -U raio_x raio_x  # abrir SQL no banco
+git pull && docker compose up -d --build      # atualizar a stack
+docker compose down                           # parar tudo (dados ficam)
 ```
 
 **Migração da base existente no Supabase** (opcional, uma vez):
@@ -69,6 +92,12 @@ SUPABASE_URL='postgresql://postgres.<REF>:<SENHA>@aws-0-<regiao>.pooler.supabase
   bash deploy/migrar_supabase.sh
 ```
 Use a porta **5432** (session pooler); a 6543 não suporta `pg_dump`.
+No caminho Docker, sem instalar cliente PostgreSQL no host:
+```bash
+docker run --rm -i postgres:16-alpine \
+  pg_dump "$SUPABASE_URL" --schema=public --no-owner --no-privileges \
+  | docker compose exec -T db psql -U raio_x -d raio_x
+```
 
 ## Operação
 
