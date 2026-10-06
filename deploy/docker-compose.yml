@@ -1,0 +1,51 @@
+# Alternativa ao setup_vps.sh: stack completa via Docker.
+#   cd deploy && docker compose up -d --build
+# Para rodar o pipeline manualmente:
+#   docker compose run --rm scraper python src/run_daily.py --no-db
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: raio_x
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: raio_x
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../scraper/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./sql/02_cache_tables.sql:/docker-entrypoint-initdb.d/02_cache_tables.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raio_x -d raio_x"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://raio_x:${POSTGRES_PASSWORD}@db:5432/raio_x
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  scraper:
+    image: python:3.11-slim
+    profiles: ["scraper"]
+    working_dir: /srv
+    environment:
+      DATABASE_URL: postgresql://raio_x:${POSTGRES_PASSWORD}@db:5432/raio_x
+    volumes:
+      - ../scraper:/srv
+    command: bash -c "pip install --no-cache-dir -r requirements.txt && python src/run_daily.py --no-email"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

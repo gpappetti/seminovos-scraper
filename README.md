@@ -1,170 +1,94 @@
-# Scraper de Veículos Seminovos
+# Raio-X Seminovos
 
-Projeto de coleta diária automatizada de veículos seminovos das plataformas **Movida** e **Localiza**, com armazenamento em banco de dados PostgreSQL (Supabase) para análises temporais.
+Dashboard de análise do mercado de veículos seminovos das locadoras
+(**Localiza** e **Movida**), alimentado diariamente por um motor de
+coleta próprio.
 
-## 📋 Funcionalidades
+```
+┌─────────────────────────────┐      ┌──────────────────────────────┐
+│  scraper/  (Python)         │      │  raiz  (Next.js 16 + React)  │
+│  run_daily.py               │      │  app/api: evolucao, fipe,    │
+│  ├─ scrape_localiza.py      ├─────▶│  mix-frota, pulso, vendidos  │
+│  ├─ scrape_movida.py        │ SQL  │  UI: gráficos e métricas     │
+│  └─ db/populate_db.py       │      │  lib/db.ts (pg Pool)         │
+└──────────────┬──────────────┘      └───────────────┬──────────────┘
+               │            PostgreSQL                │
+               └──────────── veiculos ────────────────┘
+                    + fipe_cache, vendidos_cache,
+                      top_vendidos_cache (caches do dashboard)
+```
 
-- ✅ **Scraping paralelo** de Movida e Localiza (threads concorrentes)
-- ✅ **Detecção dinâmica** do buildId do Next.js (Localiza) — não quebra com deploys do site
-- ✅ **Correção automática** do bug "LONGITUDE" da API da Localiza
-- ✅ **Banco de dados point-in-time** com histórico completo e normalização
-- ✅ **Carga idempotente** — rodar múltiplas vezes não duplica dados
-- ✅ Exportação em Parquet para backup/análise offline
+- **`scraper/`** — motor de ingestão: coleta os anúncios diários das
+  locadoras, normaliza (preço, odômetro, ano, cidade/UF, bug LONGITUDE,
+  ONIX/ONIX PLUS) e grava na tabela `veiculos` (modelo point-in-time:
+  uma linha por veículo por dia).
+- **raiz** — dashboard **raio-x seminovos**: lê `veiculos`, mantém
+  caches próprios e integra a API FIPE (Parallelum) com cache local.
 
-## 🗄️ Estrutura do Banco de Dados
+## Estrutura
 
-Tabela única `veiculos` no Supabase (PostgreSQL):
+```
+├── app/, components/, lib/, hooks/   dashboard (Next.js)
+├── scraper/                          motor de ingestão (Python)
+│   ├── src/                          scrapers + orquestrador diário
+│   ├── db/                           schema.sql, populate_db.py, .env
+│   └── docs/                         guias e queries de exemplo
+├── deploy/                           VPS: setup, migração, cron, docker
+└── deploy/sql/02_cache_tables.sql    DDL das tabelas de cache
+```
 
-| Categoria | Colunas |
-|---|---|
-| **Originais** (preservadas) | marca, modelo, versao, odometro, ano_modelo_raw, cambio, preco, cidade_estado |
-| **Normalizadas** | fornecedora, data_referencia, preco_num, odometro_num, ano_fabricacao, ano_modelo, cidade, estado, marca_norm, modelo_norm |
+## Variáveis de ambiente
 
-**Modelo:** histórico completo (point-in-time) — cada veículo/dia é uma linha, permitindo análises de evolução de preço, tempo de estoque, sazonalidade, etc.
+| Variável | Onde | Uso |
+|---|---|---|
+| `DATABASE_URL` | `.env` (raiz) e `scraper/db/.env` | Conexão PostgreSQL — compartilhada por dashboard e scraper |
+| `NEXTAUTH_URL` | `.env` (raiz) | URL pública do dashboard |
 
-**Volume atual:** ~2,5 milhões de linhas (96 dias × ~27 mil veículos/dia)
+Exemplos em `.env.example` (raiz) e `scraper/db/.env.example`.
 
-## ⚙️ Configuração
+## Subir na VPS (Ubuntu)
 
-### 1. Dependências
+**Caminho 1 — script (systemd + Postgres local):**
+```bash
+git clone https://github.com/gpappetti/seminovos-scraper.git /opt/raio-x
+cd /opt/raio-x && sudo bash deploy/setup_vps.sh
+```
+O script instala Postgres + Node + Python, cria banco/usuário, aplica o
+schema, faz o build do dashboard, instala o serviço systemd e a
+rotina diária no cron (06:00).
+
+**Caminho 2 — Docker:**
+```bash
+echo "POSTGRES_PASSWORD=uma_senha_forte" > deploy/.env
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+**Migração da base existente no Supabase** (opcional, uma vez):
+```bash
+SUPABASE_URL='postgresql://postgres.<REF>:<SENHA>@aws-0-<regiao>.pooler.supabase.com:5432/postgres' \
+  bash deploy/migrar_supabase.sh
+```
+Use a porta **5432** (session pooler); a 6543 não suporta `pg_dump`.
+
+## Operação
+
+- Pipeline diário: `cd scraper && python src/run_daily.py --no-email`
+  (ou `--no-db` para gerar só os parquets). Agendado no cron pelo setup.
+- Logs: `/var/log/raio-x/pipeline.log` · Serviço: `systemctl status raio-x`
+- Backup mensal automático do banco em `/var/backups/raio-x/`.
+- Segurança: Postgres fica escutando apenas em localhost; exponha o
+  dashboard atrás de nginx + TLS ou via VPN (Tailscale/WireGuard).
+
+## Desenvolvimento local
 
 ```bash
-pip install -r requirements.txt
+# banco (qualquer Postgres 15+) com o schema aplicado:
+psql "$DATABASE_URL" -f scraper/db/schema.sql -f deploy/sql/02_cache_tables.sql
+
+# dashboard
+yarn install && yarn dev        # http://localhost:3000
+
+# pipeline
+python -m venv .venv && .venv/bin/pip install -r scraper/requirements.txt
+.venv/bin/python scraper/src/run_daily.py --no-db   # só parquets
 ```
-
-### 2. Banco de dados (Supabase)
-
-```bash
-# Copie o template
-cp db/.env.example db/.env
-
-# Edite db/.env com suas credenciais do Supabase
-# DATABASE_URL=postgresql://postgres.SEU_REF:SUA_SENHA@aws-0-us-east-1.pooler.supabase.com:6543/postgres
-
-# Crie o schema (apenas uma vez)
-python db/populate_db.py --schema
-```
-
-**⚠️ IMPORTANTE:** use a **connection string do pooler IPv4** (`aws-0-REGIÃO.pooler.supabase.com`), não a direta (`db.*.supabase.co`), pois a última usa IPv6.
-
-### 3. Carga histórica (opcional)
-
-Se você tem arquivos parquet históricos (ex.: de e-mails anteriores), coloque-os em um diretório com o padrão `{fornecedora}_veiculos_YYYY-MM-DD.parquet` e rode:
-
-```bash
-python db/populate_db.py --dir /caminho/para/parquets
-```
-
-## 🚀 Uso
-
-### Coleta diária (scraping + banco)
-
-```bash
-python src/run_daily.py
-```
-
-Isso vai:
-1. Fazer scraping da Localiza e Movida
-2. Salvar parquets locais em `data/`
-3. Inserir os dados no banco com `data_referencia` = hoje
-
-### Opções
-
-```bash
-# Apenas scraping (sem inserir no banco)
-python src/run_daily.py --no-db
-
-# Especificar data de referência
-python src/run_daily.py --date 2026-08-30
-
-# Pular envio de e-mail (funcionalidade ainda não implementada)
-python src/run_daily.py --no-email
-```
-
-### Scrapers individuais
-
-```bash
-# Apenas Localiza
-python src/scrape_localiza.py
-
-# Apenas Movida
-python src/scrape_movida.py
-```
-
-## 📊 Análises / Power BI
-
-Exemplos de queries úteis:
-
-```sql
--- Evolução de preço médio por marca/modelo ao longo do tempo
-SELECT 
-    data_referencia,
-    marca_norm,
-    modelo_norm,
-    ROUND(AVG(preco_num)) as preco_medio,
-    COUNT(*) as estoque
-FROM veiculos
-WHERE marca_norm = 'VOLKSWAGEN' AND modelo_norm = 'POLO'
-GROUP BY data_referencia, marca_norm, modelo_norm
-ORDER BY data_referencia;
-
--- Tempo médio de permanência no estoque (quanto tempo até sumir/vender)
--- (requer identificação estável de veículos via odômetro + versão + cidade)
-
--- Comparação de preços Movida vs Localiza
-SELECT 
-    modelo_norm,
-    fornecedora,
-    ROUND(AVG(preco_num)) as preco_medio,
-    COUNT(*) as qtd
-FROM veiculos
-WHERE data_referencia = '2026-08-30'
-GROUP BY modelo_norm, fornecedora
-HAVING COUNT(*) > 5
-ORDER BY modelo_norm, fornecedora;
-```
-
-## 🐛 Bugs Corrigidos
-
-### Bug "LONGITUDE" (Localiza)
-
-**Problema:** a API da Localiza retornava o campo `versaoDescricao` sempre com a string constante `"LONGITUDE"` (lixo), poluindo 100% dos registros.
-
-**Correção:** o scraper agora usa exclusivamente `modeloDescricaoReduzida` (que contém a versão real), e o pipeline de ETL remove o prefixo espúrio dos dados históricos, preservando as versões "Longitude" legítimas dos Jeep Compass/Renegade/Commander.
-
-### BuildId desatualizado (Localiza)
-
-**Problema:** o buildId do Next.js estava hardcoded (`version-4.31.0`), fazendo a API retornar 404 após deploys do site.
-
-**Correção:** detecção dinâmica via regex na página HTML — o scraper sempre usa o buildId atual.
-
-## 📁 Estrutura do Projeto
-
-```
-seminovos-scraper/
-├── src/
-│   ├── scrape_localiza.py   # Scraper da Localiza (corrigido)
-│   ├── scrape_movida.py     # Scraper da Movida
-│   ├── scrape_vehicles.py   # (legado, mantido para referência)
-│   └── run_daily.py         # ⭐ Orquestrador principal (scraping + banco)
-├── db/
-│   ├── schema.sql           # DDL da tabela veiculos
-│   ├── populate_db.py       # Pipeline de ETL (correção + normalização + carga)
-│   ├── .env.example         # Template de configuração
-│   └── .env                 # ⚠️ SUA senha (não commitado)
-├── data/                    # Parquets gerados localmente (ignorado pelo git)
-├── requirements.txt
-└── README.md
-```
-
-## 🤝 Contribuindo
-
-Melhorias bem-vindas:
-- [ ] Implementar envio de e-mail com os parquets (atualmente é placeholder)
-- [ ] Dashboard web (Streamlit/Plotly) para visualização dos dados
-- [ ] Detector de oportunidades (carros com preço abaixo da curva)
-- [ ] Alertas de novos modelos/versões
-
-## 📄 Licença
-
-MIT — veja LICENSE para detalhes.

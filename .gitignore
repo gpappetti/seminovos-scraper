@@ -1,42 +1,42 @@
-# Byte-compiled / optimized / DLL files
+# ── Node / Next.js (dashboard) ──
+node_modules/
+.next/
+out/
+.yarn/install-state.gz
+*.tsbuildinfo
+.vercel/
+
+# ── Python (scraper) ──
 __pycache__/
 *.py[cod]
 *$py.class
-
-# Distribution / packaging
 build/
 dist/
 *.egg-info/
 .eggs/
-
-# Virtual environments
 .venv/
 venv/
 env/
 ENV/
+.ipynb_checkpoints/
 
-# Ambientes / segredos
+# ── Segredos / ambiente ──
 .env
-*.env
+.env.*
+!*.env.example
+scraper/db/.env
 
-# Dados coletados (arquivos parquet e resumos gerados)
-data/*.parquet
-data/*.json
+# ── Dados coletados (parquets e resumos gerados) ──
 *.parquet
 scrape_summary.json
 
-# IDEs e editores
+# ── IDEs e sistema ──
 .vscode/
 .idea/
 *.swp
 .DS_Store
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Logs
 *.log
 
-# Segredos do banco
-db/.env
-.env
+# ── Arquivos locais fora do repo ──
+*.zip
+.abacusai/
