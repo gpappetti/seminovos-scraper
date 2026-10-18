@@ -13,7 +13,7 @@ import {
 import {
   Activity, TrendingUp, PieChart, Scale, BookOpen,
   Car, DollarSign, Gauge, MapPin, Calendar, Loader2,
-  AlertTriangle, ShoppingCart, ArrowUpRight, ArrowDownRight,
+  AlertTriangle, ShoppingCart, ArrowUpRight, ArrowDownRight, Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -44,6 +44,12 @@ interface FipeData {
   cobertura_geral: number;
   fipe_por_km: any[];
   scatter: any[];
+}
+interface PermanenciaData {
+  data_referencia: string;
+  margem_dias: number;
+  por_fornecedora: { fornecedora: string; qtd_veiculos: number; permanencia_media_dias: number; permanencia_mediana_dias: number }[];
+  por_modelo: { fornecedora: string; modelo: string; qtd_veiculos: number; permanencia_media_dias: number }[];
 }
 interface VendidosData {
   data_referencia: string;
@@ -117,6 +123,7 @@ export function Dashboard() {
   const { data: vendidos, loading: loadVendidos, error: errVendidos } = useFetch<VendidosData>('/api/vendidos');
   const { data: evo, loading: loadEvo, error: errEvo } = useFetch<EvoData>('/api/evolucao');
   const { data: mix, loading: loadMix, error: errMix } = useFetch<MixData>('/api/mix-frota');
+  const { data: permanencia, loading: loadPermanencia, error: errPermanencia } = useFetch<PermanenciaData>('/api/permanencia');
   const { data: fipe, loading: loadFipe, error: errFipe } = useFetch<FipeData>('/api/fipe');
 
   const scrollTo = useCallback((id: string) => {
@@ -137,14 +144,14 @@ export function Dashboard() {
       { rootMargin: '-100px 0px -60% 0px' }
     );
 
-    const ids = ['pulso', 'vendidos', 'evolucao', 'mix', 'fipe', 'metodologia'];
+    const ids = ['pulso', 'vendidos', 'evolucao', 'mix', 'permanencia', 'fipe', 'metodologia'];
     ids.forEach(id => {
       const el = sectionRefs.current[id];
       if (el) observer.observe(el);
     });
 
     return () => observer.disconnect();
-  }, [loadPulso, loadVendidos, loadEvo, loadMix, loadFipe]);
+  }, [loadPulso, loadVendidos, loadEvo, loadMix, loadPermanencia, loadFipe]);
 
   // Prepare evo data
   const evoPreco = prepareEvoSeries(evo?.serie ?? [], 'media_preco');
@@ -163,6 +170,18 @@ export function Dashboard() {
   const mixKmMov = (mix?.por_km ?? []).filter((r: any) => r?.fornecedora === 'MOVIDA').map((r: any) => ({ name: r?.faixa_km ?? '', qtd: Number(r?.qtd ?? 0) }));
   const mixAnoLoc = (mix?.por_ano ?? []).filter((r: any) => r?.fornecedora === 'LOCALIZA').map((r: any) => ({ name: String(r?.ano_modelo ?? ''), qtd: Number(r?.qtd ?? 0) }));
   const mixAnoMov = (mix?.por_ano ?? []).filter((r: any) => r?.fornecedora === 'MOVIDA').map((r: any) => ({ name: String(r?.ano_modelo ?? ''), qtd: Number(r?.qtd ?? 0) }));
+
+  // Prepare permanência data (por modelo, top 10 por fornecedora)
+  const permFornLoc = (permanencia?.por_fornecedora ?? []).find((r: any) => r?.fornecedora === 'LOCALIZA');
+  const permFornMov = (permanencia?.por_fornecedora ?? []).find((r: any) => r?.fornecedora === 'MOVIDA');
+  const permModeloLoc = (permanencia?.por_modelo ?? [])
+    .filter((r: any) => r?.fornecedora === 'LOCALIZA')
+    .slice(0, 10)
+    .map((r: any) => ({ name: r?.modelo ?? '', dias: Number(r?.permanencia_media_dias ?? 0) }));
+  const permModeloMov = (permanencia?.por_modelo ?? [])
+    .filter((r: any) => r?.fornecedora === 'MOVIDA')
+    .slice(0, 10)
+    .map((r: any) => ({ name: r?.modelo ?? '', dias: Number(r?.permanencia_media_dias ?? 0) }));
 
   // Prepare FIPE champions from stats.campeoes (per fornecedora)
   const fipeLocCampeoes = (fipe?.stats?.LOCALIZA?.campeoes ?? []).slice(0, 8);
@@ -485,6 +504,52 @@ export function Dashboard() {
                     <VBarChart data={mixAnoMov} color={COLORS.movida} />
                   </div>
                 </div>
+              </>
+            )}
+          </section>
+
+          {/* ===== SECTION: PERMANÊNCIA ===== */}
+          <section id="permanencia" ref={(el) => { sectionRefs.current['permanencia'] = el; }} className="mt-12">
+            <SectionHeader
+              icon={<Clock className="h-5 w-5 text-primary" />}
+              title="Tempo Médio de Permanência à Venda"
+              subtitle="Dias entre o primeiro e o último registro no estoque de cada veículo, até ele deixar de aparecer."
+            />
+
+            {loadPermanencia ? <LoadingState text="Calculando tempo de permanência..." /> : errPermanencia ? <ErrorState msg={errPermanencia} /> : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                  <MetricCard
+                    label="Localiza — consolidado"
+                    value={`${permFornLoc?.permanencia_media_dias ?? 0} dias`}
+                    subtitle={`média ponderada · ${formatBR(permFornLoc?.qtd_veiculos ?? 0)} veículos · mediana ${permFornLoc?.permanencia_mediana_dias ?? 0} dias`}
+                    color="orange"
+                  />
+                  <MetricCard
+                    label="Movida — consolidado"
+                    value={`${permFornMov?.permanencia_media_dias ?? 0} dias`}
+                    subtitle={`média ponderada · ${formatBR(permFornMov?.qtd_veiculos ?? 0)} veículos · mediana ${permFornMov?.permanencia_mediana_dias ?? 0} dias`}
+                    color="blue"
+                  />
+                </div>
+
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                  Por Modelo — top 10 com maior permanência média
+                </p>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                  <div className="rounded-lg border border-border/50 bg-card p-4">
+                    <p className="text-xs text-muted-foreground mb-2">Localiza</p>
+                    <HBarChart data={permModeloLoc} color={COLORS.localiza} height={320} valueKey="dias" formatter={(v) => `${v} dias`} />
+                  </div>
+                  <div className="rounded-lg border border-border/50 bg-card p-4">
+                    <p className="text-xs text-muted-foreground mb-2">Movida</p>
+                    <HBarChart data={permModeloMov} color={COLORS.movida} height={320} valueKey="dias" formatter={(v) => `${v} dias`} />
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground">
+                  Considera apenas veículos com saída confirmada (última aparição há pelo menos {permanencia?.margem_dias ?? 4} dias da coleta mais recente) e modelos com no mínimo 3 veículos observados, para evitar ruído de falhas de coleta.
+                </p>
               </>
             )}
           </section>

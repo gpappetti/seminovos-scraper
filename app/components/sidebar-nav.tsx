@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Activity, TrendingUp, PieChart, Scale, BookOpen,
-  Menu, X, ChevronRight, ShoppingCart,
+  Menu, X, ChevronRight, ShoppingCart, Clock,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { id: 'vendidos', label: 'Veículos Vendidos', icon: ShoppingCart },
   { id: 'evolucao', label: 'Evolução Histórica', icon: TrendingUp },
   { id: 'mix', label: 'Mix da Frota', icon: PieChart },
+  { id: 'permanencia', label: 'Tempo de Permanência', icon: Clock },
   { id: 'fipe', label: 'Comparação FIPE', icon: Scale },
   { id: 'metodologia', label: 'Metodologia', icon: BookOpen },
 ];
