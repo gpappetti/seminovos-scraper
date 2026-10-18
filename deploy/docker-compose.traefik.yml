@@ -1,9 +1,13 @@
-# Override que publica o dashboard via Traefik (HTTPS + senha).
+# Override que publica o dashboard via Traefik (HTTPS, acesso publico).
 # Uso na VPS (onde um Traefik proxy ja roda na rede proxy-net):
 #   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
 # Requer no deploy/.env (fora do git):
-#   RAIOX_BASIC_AUTH=usuario:hash_apr1   (openssl passwd -apr1)
-#   RAIOX_DOMAIN=seu.host.hstgr.cloud
+#   RAIOX_DOMAIN=app.seudominio.com
+#
+# Acesso publico (projeto de portfolio): sem basic auth. Um rate limit
+# por IP protege as APIs de agregacao contra abuso/bots:
+#   60 req por 10s (media 6 rps) com rajada de 30 — uma pessoa navegando
+#   nao chega perto; um scraper ingenuo, sim.
 services:
   app:
     networks:
@@ -14,9 +18,11 @@ services:
       - traefik.http.routers.raiox.rule=Host(`${RAIOX_DOMAIN:?defina RAIOX_DOMAIN no .env}`)
       - traefik.http.routers.raiox.entrypoints=websecure
       - traefik.http.routers.raiox.tls.certresolver=letsencrypt
-      - traefik.http.routers.raiox.middlewares=raiox-auth
+      - traefik.http.routers.raiox.middlewares=raiox-ratelimit
       - traefik.http.services.raiox.loadbalancer.server.port=3000
-      - traefik.http.middlewares.raiox-auth.basicauth.users=${RAIOX_BASIC_AUTH:?defina RAIOX_BASIC_AUTH no .env}
+      - traefik.http.middlewares.raiox-ratelimit.ratelimit.average=60
+      - traefik.http.middlewares.raiox-ratelimit.ratelimit.burst=30
+      - traefik.http.middlewares.raiox-ratelimit.ratelimit.period=10s
 
 networks:
   proxy-net:
